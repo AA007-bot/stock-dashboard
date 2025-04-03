@@ -1,4 +1,4 @@
-# Streamlit-Based Web Dashboard for Stock Prediction
+# Streamlit-Based Web Dashboard for Stock Prediction (Quant Edition)
 
 # Imports
 import streamlit as st
@@ -14,6 +14,8 @@ from textblob import TextBlob
 import requests
 from bs4 import BeautifulSoup
 import xgboost as xgb
+from fpdf import FPDF
+import tempfile
 
 # Model registry
 MODEL_REGISTRY = {
@@ -22,7 +24,6 @@ MODEL_REGISTRY = {
     "XGBoost": xgb.XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
 }
 
-# --- Cached Data Function ---
 @st.cache_data
 def get_stock_data(symbol, start_date, end_date):
     try:
@@ -47,7 +48,7 @@ def get_headlines(symbol):
         soup = BeautifulSoup(response.text, "html.parser")
         headlines = soup.find_all("h3")
         return [h.get_text() for h in headlines if h.get_text()][:5]
-    except Exception as e:
+    except Exception:
         return []
 
 def analyze_sentiment(headlines):
@@ -55,6 +56,19 @@ def analyze_sentiment(headlines):
         return 0.0
     sentiment_scores = [TextBlob(h).sentiment.polarity for h in headlines]
     return np.mean(sentiment_scores)
+
+def calculate_quant_metrics(returns):
+    sharpe = np.mean(returns) / (np.std(returns) + 1e-6)
+    std_dev = np.std(returns)
+    alpha = np.mean(returns)
+    beta = np.cov(returns, returns)[0][1] / (np.var(returns) + 1e-6)
+    return sharpe, alpha, beta, std_dev
+
+def backtest_strategy(predictions):
+    signals = np.sign(np.diff(predictions))
+    returns = signals * np.diff(predictions)
+    cumulative_returns = np.cumsum(returns)
+    return cumulative_returns[-1], returns, cumulative_returns
 
 def run_model(data, model_name):
     feature_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'MA_5', 'MA_10', 'Volatility']
@@ -67,120 +81,43 @@ def run_model(data, model_name):
     predictions = model.predict(X_test)
     rmse = np.sqrt(mean_squared_error(y_test, predictions))
     r2 = r2_score(y_test, predictions)
+    returns = np.diff(predictions) / predictions[:-1]
+    sharpe, alpha, beta, std_dev = calculate_quant_metrics(returns)
+    strategy_return, daily_returns, cumulative_returns = backtest_strategy(predictions)
+
     if hasattr(model, 'feature_importances_'):
         importances = model.feature_importances_
     elif hasattr(model, 'coef_'):
         importances = model.coef_
     else:
         importances = np.zeros(len(feature_cols))
-    return y_test, predictions, rmse, r2, pd.Series(importances, index=feature_cols), pd.DataFrame({"Actual": y_test.values, "Predicted": predictions})
 
-def plot_predictions(y_test, pred_dict):
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(y_test.values[:50], label='Actual')
-    for model_name, preds in pred_dict.items():
-        ax.plot(preds[:50], label=f'Predicted ({model_name})')
-    ax.set_title('Stock Price Prediction Comparison')
-    ax.set_xlabel('Data Point Index')
-    ax.set_ylabel('Stock Closing Price (USD)')
-    ax.legend()
-    st.pyplot(fig)
+    return y_test, predictions, rmse, r2, sharpe, alpha, beta, std_dev, strategy_return, cumulative_returns, pd.Series(importances, index=feature_cols), pd.DataFrame({"Actual": y_test.values, "Predicted": predictions})
 
-def plot_historical_prices(data, symbol):
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(data.index, data['Close'], label='Historical Close')
-    ax.set_title(f'{symbol} Historical Closing Prices')
-    ax.set_xlabel('Date')
-    ax.set_ylabel('Price (USD)')
-    ax.legend()
-    st.pyplot(fig)
+def generate_pdf_report(results):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.cell(200, 10, txt="Stock Insight Pro Report", ln=True, align='C')
+    pdf.ln(10)
 
-def plot_volume_volatility(data):
-    fig, ax = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    ax[0].plot(data.index, data['Volume'], label='Volume', color='orange')
-    ax[0].set_ylabel('Volume')
-    ax[0].legend()
-    ax[1].plot(data.index, data['Volatility'], label='Volatility', color='purple')
-    ax[1].set_ylabel('Volatility')
-    ax[1].legend()
-    plt.xlabel('Date')
-    st.pyplot(fig)
+    for entry in results:
+        line = f"{entry['Symbol']} ({entry['Model']}): RMSE={entry['RMSE']}, R²={entry['R2 Score']}, Sharpe={entry['Sharpe']}, Alpha={entry['Alpha']}, Beta={entry['Beta']}, Volatility={entry['Volatility']}, StrategyReturn={entry['Strategy Return']}"
+        pdf.multi_cell(0, 10, line)
+        pdf.ln(2)
 
-def main():
-    st.set_page_config(page_title="Stock Insight Pro", page_icon="📈", layout="wide")
+    tmpfile = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    pdf.output(tmpfile.name)
+    return tmpfile.name
 
-    with st.sidebar:
-        st.image("https://upload.wikimedia.org/wikipedia/commons/1/17/Google-flutter-logo.png", width=150)
-        st.title("📊 Stock Dashboard")
-        st.markdown("Explore, analyze, and compare stock predictions with multiple models.")
-        st.markdown("**Metrics**:")
-        st.markdown("- **RMSE** (Root Mean Squared Error): How far off predictions are, on average.")
-        st.markdown("- **R² Score**: How well the model explains actual price movement.")
-        st.markdown("---")
-        st.markdown("Made with ❤️ using Streamlit")
-
-    st.title("📈 Stock Insight Pro")
-    st.markdown("Compare stock predictions using different models.")
-
-    symbols = st.text_input("Enter Stock Symbols separated by commas (e.g., TSLA, AAPL, MSFT):", value="TSLA, AAPL")
-    start_date = st.date_input("Start Date", pd.to_datetime("2020-01-01"))
-    end_date = st.date_input("End Date", pd.to_datetime("2024-12-31"))
-
-    comparison_results = []
-
-    if st.button("Run Comparison"):
-        symbol_list = [s.strip().upper() for s in symbols.split(',') if s.strip()]
-        tabs = st.tabs(symbol_list)
-
-        for i, symbol in enumerate(symbol_list):
-            with tabs[i]:
-                st.subheader(f"📉 Historical Prices for {symbol}")
-                data = get_stock_data(symbol, start_date, end_date)
-                if data is None:
-                    continue
-
-                plot_historical_prices(data, symbol)
-                plot_volume_volatility(data)
-
-                headlines = get_headlines(symbol)
-                sentiment = analyze_sentiment(headlines)
-                st.subheader(f"🗞️ News Sentiment Score for {symbol}: {sentiment:.2f}")
-
-                if headlines:
-                    st.markdown("**Recent Headlines:**")
-                    for h in headlines:
-                        st.markdown(f"- {h}")
-
-                st.subheader("📊 Comparing Models")
-                pred_dict = {}
-                metrics = []
-                y_test_final = None
-
-                for model_type in MODEL_REGISTRY:
-                    y_test, preds, rmse, r2, _, _ = run_model(data, model_type)
-                    pred_dict[model_type] = preds
-                    y_test_final = y_test
-                    metrics.append({"Symbol": symbol, "Model": model_type, "RMSE": round(rmse, 2), "R2 Score": round(r2, 2)})
-
-                plot_predictions(y_test_final, pred_dict)
-
-                st.markdown("**Model Metrics:**")
-                for m in metrics:
-                    st.markdown(f"**{m['Model']}** — RMSE: {m['RMSE']}, R²: {m['R2 Score']}")
-                    comparison_results.append(m)
-
-        if comparison_results:
-            st.subheader("📋 Model Comparison Summary")
-            summary_df = pd.DataFrame(comparison_results)
-            st.dataframe(summary_df)
-            csv_summary = summary_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="Download Comparison Summary as CSV",
-                data=csv_summary,
-                file_name='comparison_summary.csv',
-                mime='text/csv'
-            )
-
-if __name__ == "__main__":
-    main()
+def plot_strategy_returns(cumulative_dict):
+    st.subheader("📈 Cumulative Strategy Returns")
+    for model, curve in cumulative_dict.items():
+        plt.plot(curve, label=model)
+    plt.title("Cumulative Return Based on Strategy")
+    plt.xlabel("Time")
+    plt.ylabel("Cumulative Return")
+    plt.legend()
+    st.pyplot(plt.gcf())
+    plt.clf()
 
