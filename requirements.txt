@@ -1,0 +1,6 @@
+streamlit
+yfinance
+textblob
+beautifulsoup4
+scikit-learn
+matplotlib
