@@ -95,8 +95,30 @@ def plot_historical_prices(data, symbol):
     ax.legend()
     st.pyplot(fig)
 
+def plot_volume_volatility(data):
+    fig, ax = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    ax[0].plot(data.index, data['Volume'], label='Volume', color='orange')
+    ax[0].set_ylabel('Volume')
+    ax[0].legend()
+    ax[1].plot(data.index, data['Volatility'], label='Volatility', color='purple')
+    ax[1].set_ylabel('Volatility')
+    ax[1].legend()
+    plt.xlabel('Date')
+    st.pyplot(fig)
+
 def main():
     st.set_page_config(page_title="Stock Insight Pro", page_icon="📈", layout="wide")
+
+    with st.sidebar:
+        st.image("https://upload.wikimedia.org/wikipedia/commons/1/17/Google-flutter-logo.png", width=150)
+        st.title("📊 Stock Dashboard")
+        st.markdown("Explore, analyze, and compare stock predictions with multiple models.")
+        st.markdown("**Metrics**:")
+        st.markdown("- **RMSE** (Root Mean Squared Error): How far off predictions are, on average.")
+        st.markdown("- **R² Score**: How well the model explains actual price movement.")
+        st.markdown("---")
+        st.markdown("Made with ❤️ using Streamlit")
+
     st.title("📈 Stock Insight Pro")
     st.markdown("Compare stock predictions using different models.")
 
@@ -118,6 +140,7 @@ def main():
                     continue
 
                 plot_historical_prices(data, symbol)
+                plot_volume_volatility(data)
 
                 headlines = get_headlines(symbol)
                 sentiment = analyze_sentiment(headlines)
@@ -160,3 +183,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
