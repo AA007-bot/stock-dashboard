@@ -1,109 +1,80 @@
 import streamlit as st
+from datetime import datetime
 import pandas as pd
-import numpy as np
 import yfinance as yf
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error, r2_score
-from textblob import TextBlob
-import requests
-from bs4 import BeautifulSoup
-import xgboost as xgb
-from fpdf import FPDF
-import tempfile
+import numpy as np
 
-# Streamlit-Based Web Dashboard for Stock Prediction (Quant Edition)
-
-def get_stock_data(symbol, start_date, end_date):
+# Redesigned Professional UI for Stock Dashboard
+def fetch_stock_data(ticker, start_date, end_date):
     try:
-        stock_data = yf.download(symbol, start=start_date, end=end_date)
-        if stock_data.empty:
-            st.error(f"No data found for {symbol}. Please check the symbol or date range.")
+        data = yf.download(ticker, start=start_date, end=end_date)
+        if data.empty:
+            st.error(f"No data found for {ticker}. Please check the symbol or date range.")
             return None
-        return stock_data
+        return data
     except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {e}")
+        st.error(f"Error fetching data for {ticker}: {e}")
         return None
 
-def get_headlines(symbol):
-    # Placeholder for fetching headlines (to be implemented)
-    return ["Sample headline 1", "Sample headline 2"]
+def display_stock_metrics(data):
+    st.subheader("📊 Key Metrics")
+    latest_close = float(data['Close'].iloc[-1]) if not data['Close'].empty else None
+    daily_change = float(data['Close'].iloc[-1] - data['Close'].iloc[-2]) if len(data['Close']) > 1 else None
+    daily_change_pct = float((daily_change / data['Close'].iloc[-2]) * 100) if daily_change is not None else None
 
-def analyze_sentiment(headlines):
-    # Placeholder for sentiment analysis (to be implemented)
-    return np.random.uniform(-1, 1)  # Random sentiment score for now
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Latest Close", f"${latest_close:.2f}" if latest_close is not None else "N/A")
+    col2.metric("Daily Change", f"${daily_change:.2f}" if daily_change is not None else "N/A", \
+                f"{daily_change_pct:.2f}%" if daily_change_pct is not None else "N/A")
+    col3.metric("Volume", f"{int(data['Volume'].iloc[-1]):,}" if not data['Volume'].empty else "N/A")
 
-def run_model(data, model_name):
-    # Placeholder for running models (to be implemented)
-    # Returns dummy values for now
-    return [None] * 12
+def plot_stock_chart(data, ticker):
+    st.subheader(f"📈 {ticker} Price Chart")
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(data['Close'], label='Close Price', color='blue')
+    ax.set_title(f"{ticker} Price Chart")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Price")
+    ax.legend()
+    st.pyplot(fig)
 
-def plot_strategy_returns(cumulative_dict):
-    # Placeholder for plotting strategy returns (to be implemented)
-    st.line_chart(pd.DataFrame(cumulative_dict))
+def plot_technical_indicators(data, ticker):
+    st.subheader(f"📉 {ticker} Technical Indicators")
+    data['SMA_50'] = data['Close'].rolling(window=50).mean()
+    data['SMA_200'] = data['Close'].rolling(window=200).mean()
 
-def generate_pdf_report(results):
-    # Placeholder for generating PDF report (to be implemented)
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    return temp_file.name
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(data['Close'], label='Close Price', color='blue')
+    ax.plot(data['SMA_50'], label='50-Day SMA', color='orange')
+    ax.plot(data['SMA_200'], label='200-Day SMA', color='green')
+    ax.set_title(f"{ticker} Moving Averages")
+    ax.legend()
+    st.pyplot(fig)
 
 def main():
-    st.set_page_config(page_title="Stock Insight Pro", layout="wide")
-    st.title("📊 Stock Insight Pro – Quant Dashboard")
+    st.set_page_config(page_title="Professional Stock Dashboard", layout="wide")
+    st.title("📊 Professional Stock Dashboard")
 
-    symbols_input = st.text_input("Enter stock symbols (comma separated):", value="TSLA, AAPL")
-    start_date = st.date_input("Start Date", pd.to_datetime("2020-01-01"))
-    end_date = st.date_input("End Date", pd.to_datetime("2023-12-31"))
+    # Sidebar for user inputs
+    st.sidebar.header("Navigation")
+    ticker = st.sidebar.text_input("Enter Stock Ticker (e.g., AAPL, TSLA):", value="AAPL")
+    start_date = st.sidebar.date_input("Start Date", datetime(2020, 1, 1))
+    end_date = st.sidebar.date_input("End Date", datetime.today())
 
-    if st.button("Run Analysis"):
-        symbols = [s.strip().upper() for s in symbols_input.split(',') if s.strip()]
-        all_results = []
+    if st.sidebar.button("Analyze Stock"):
+        data = fetch_stock_data(ticker, start_date, end_date)
+        if data is not None:
+            st.header(f"Stock Analysis for {ticker}")
 
-        for symbol in symbols:
-            st.subheader(f"📈 {symbol} Analysis")
-            data = get_stock_data(symbol, start_date, end_date)
-            if data is None:
-                continue
+            # Display key metrics
+            display_stock_metrics(data)
 
-            headlines = get_headlines(symbol)
-            sentiment = analyze_sentiment(headlines)
-            st.markdown(f"**News Sentiment Score**: {sentiment:.2f}")
+            # Display stock chart
+            plot_stock_chart(data, ticker)
 
-            MODEL_REGISTRY = ["LinearRegression", "RandomForest", "XGBoost"]
-            metrics_table = []
-            cumulative_dict = {}
-            prediction_plot_data = {}
-
-            for model_name in MODEL_REGISTRY:
-                y_test, preds, rmse, r2, sharpe, alpha, beta, std_dev, strategy_ret, cumulative_ret, importances, df_preds = run_model(data, model_name)
-                cumulative_dict[model_name] = cumulative_ret
-                metrics_table.append({
-                    "Symbol": symbol, "Model": model_name, "RMSE": round(rmse, 2), "R2 Score": round(r2, 2),
-                    "Sharpe": round(sharpe, 2), "Alpha": round(alpha, 2), "Beta": round(beta, 2),
-                    "Volatility": round(std_dev, 2), "Strategy Return": round(strategy_ret, 2)
-                })
-
-            # Metrics table
-            metrics_df = pd.DataFrame(metrics_table)
-            st.dataframe(metrics_df)
-
-            # Prediction preview
-            st.line_chart(pd.DataFrame(prediction_plot_data))
-
-            # Cumulative strategy return plot
-            plot_strategy_returns(cumulative_dict)
-
-            all_results.extend(metrics_table)
-
-        if all_results:
-            csv = pd.DataFrame(all_results).to_csv(index=False).encode('utf-8')
-            st.download_button("Download CSV Summary", csv, "model_summary.csv", "text/csv")
-
-            pdf_path = generate_pdf_report(all_results)
-            with open(pdf_path, "rb") as f:
-                st.download_button("Download PDF Report", f, "summary_report.pdf", "application/pdf")
+            # Display technical indicators
+            plot_technical_indicators(data, ticker)
 
 if __name__ == "__main__":
     main()
